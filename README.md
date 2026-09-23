@@ -32,23 +32,32 @@ import (
 
 func main() {
     fs := varg.New("myapp")
+    fs.Version("1.0.0")  // Enable --version flag
     
     // Define flags with dot notation for nesting
     fs.String("server.host", "", "localhost", "server host").EnvWithPrefix("APP")
     fs.Int("server.port", "", 8080, "server port").EnvWithPrefix("APP")
     fs.String("db.host", "", "localhost", "db host").Env("DB_HOST")
-    fs.Bool("verbose", "v", false, "verbose output")
+    fs.Int("verbose", "v", 0, "verbosity level")
     
     // Parse command-line arguments
     cfg, err := fs.Parse(os.Args[1:])
     if err != nil {
+        if err.Error() == "__HELP__" {
+            fmt.Print(fs.Usage())
+            os.Exit(0)
+        }
+        if err.Error() == "__VERSION__" {
+            fmt.Println("myapp version " + fs.version)
+            os.Exit(0)
+        }
         fmt.Fprintf(os.Stderr, "Error: %v\n", err)
         os.Exit(1)
     }
     
     // Access values
     fmt.Printf("Server: %s:%d\n", cfg.String("server.host"), cfg.Int("server.port"))
-    fmt.Printf("Verbose: %v\n", cfg.Bool("verbose"))
+    fmt.Printf("Verbosity: %d\n", cfg.Int("verbose"))
 }
 ```
 
@@ -119,12 +128,52 @@ fs.GlobalEnvPrefix("MYAPP").String("output", "o", "out.log", "output")
 // Looks for MYAPP_OUTPUT env var
 ```
 
+#### `Version(v string) *FlagSet`
+Sets the version string for the automatic `--version` flag (chaining).
+
+```go
+fs.Version("1.2.3")
+```
+
+#### `DisableHelp() *FlagSet`
+Disables the automatic `--help(-h)` flag (chaining).
+
+```go
+fs.DisableHelp()
+```
+
+#### `DisableVersion() *FlagSet`
+Disables the automatic `--version(-v)` flag (chaining).
+
+```go
+fs.DisableVersion()
+```
+
+#### `Usage() string`
+Returns a formatted usage string (help text).
+
+```go
+fmt.Print(fs.Usage())
+```
+
 #### `Parse(args []string) (*Config, error)`
 Parses command-line arguments and returns a Config with resolved values.
+
+Returns special errors for built-in flags:
+- `error.Error() == "__HELP__"` when `--help` or `-h` is used
+- `error.Error() == "__VERSION__"` when `--version` or `-v` is used
 
 ```go
 cfg, err := fs.Parse(os.Args[1:])
 if err != nil {
+    if err.Error() == "__HELP__" {
+        fmt.Print(fs.Usage())
+        os.Exit(0)
+    }
+    if err.Error() == "__VERSION__" {
+        fmt.Printf("myapp %s\n", fs.version)
+        os.Exit(0)
+    }
     log.Fatal(err)
 }
 ```
@@ -345,6 +394,32 @@ cfg, _ = fs.Parse([]string{})
 ./app --verbose
 ./app --debug=true
 ./app --debug=false
+```
+
+### Numeral shorthand (counting)
+For int flags, repeated short flags count automatically:
+```bash
+./app -vvv          # Same as -v 3
+./app -dd           # Same as -d 2
+```
+
+Useful for verbosity levels or debug depth.
+
+### Increment/decrement with +
+Use `+` prefix to pass negative value (decrement):
+```bash
+./app +v            # Sets flag to -1
+./app +count        # Decrements counter
+```
+
+### Built-in flags
+
+Automatically available (unless disabled):
+```bash
+./app --help        # Show usage and available flags
+./app -h            # Short form
+./app --version     # Show version (if set with .Version())
+./app -v            # Short form
 ```
 
 ## Environment Variable Naming

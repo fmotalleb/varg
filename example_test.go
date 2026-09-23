@@ -11,12 +11,14 @@ func TestExampleBasicUsage(t *testing.T) {
 	fs.Int("port", "p", 8080, "listen port")
 	fs.Bool("verbose", "v", false, "verbose output")
 
-	cfg, _ := fs.Parse([]string{
+	cfg, err := fs.Parse([]string{
 		"--output", "custom.log",
 		"--port", "9000",
 		"-v",
 	})
-
+	if err != nil {
+		t.Error(err)
+	}
 	if cfg.String("output") != "custom.log" {
 		t.Errorf("output mismatch")
 	}
@@ -165,5 +167,48 @@ func TestExamplePrecedence(t *testing.T) {
 	cfg, _ = fs.Parse([]string{})
 	if cfg.String("config") != "default.conf" {
 		t.Errorf("default precedence failed")
+	}
+}
+
+// TestExampleVersion demonstrates version flag.
+func TestExampleVersion(t *testing.T) {
+	fs := New("myapp")
+	fs.Version("1.2.3")
+	fs.String("output", "o", "output.log", "output file")
+
+	_, err := fs.Parse([]string{"--version"})
+	if err == nil || err.Error() != "__VERSION__" {
+		t.Errorf("expected __VERSION__ error, got %v", err)
+	}
+}
+
+// TestExampleNumeralShorthand demonstrates -vvv shorthand.
+func TestExampleNumeralShorthand(t *testing.T) {
+	fs := New("myapp")
+	fs.Int("verbose", "v", 0, "verbosity level")
+	fs.DisableHelp().DisableVersion()
+
+	cfg, err := fs.Parse([]string{"-vvv"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	if cfg.Int("verbose") != 3 {
+		t.Errorf("expected 3, got %d", cfg.Int("verbose"))
+	}
+}
+
+// TestExampleIncrement demonstrates increment/decrement with +flag.
+func TestExampleIncrement(t *testing.T) {
+	fs := New("myapp")
+	fs.Int("priority", "p", 0, "priority level")
+
+	cfg, err := fs.Parse([]string{"+p"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	if cfg.Int("priority") != -1 {
+		t.Errorf("expected -1, got %d", cfg.Int("priority"))
 	}
 }

@@ -1,6 +1,7 @@
 package varg
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -394,5 +395,121 @@ func TestNonExistentKey(t *testing.T) {
 
 	if got := cfg.String("nonexistent"); got != "" {
 		t.Errorf("String: expected empty string, got '%s'", got)
+	}
+}
+
+func TestHelpFlag(t *testing.T) {
+	fs := New("test")
+	fs.String("output", "o", "default.txt", "output file")
+
+	_, err := fs.Parse([]string{"--help"})
+	if err == nil || err.Error() != "__HELP__" {
+		t.Errorf("expected __HELP__ error, got %v", err)
+	}
+
+	_, err = fs.Parse([]string{"-h"})
+	if err == nil || err.Error() != "__HELP__" {
+		t.Errorf("expected __HELP__ error with -h, got %v", err)
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	fs := New("test")
+	fs.Version("1.0.0")
+
+	_, err := fs.Parse([]string{"--version"})
+	if err == nil || err.Error() != "__VERSION__" {
+		t.Errorf("expected __VERSION__ error, got %v", err)
+	}
+
+	_, err = fs.Parse([]string{"-v"})
+	if err == nil || err.Error() != "__VERSION__" {
+		t.Errorf("expected __VERSION__ error with -v, got %v", err)
+	}
+}
+
+func TestDisableHelp(t *testing.T) {
+	fs := New("test")
+	fs.DisableHelp()
+	fs.String("output", "o", "default.txt", "output file")
+
+	_, err := fs.Parse([]string{"--help"})
+	if err == nil {
+		t.Errorf("expected error for --help when disabled, got nil")
+	}
+}
+
+func TestDisableVersion(t *testing.T) {
+	fs := New("test")
+	fs.DisableVersion()
+	fs.Version("1.0.0")
+
+	_, err := fs.Parse([]string{"--version"})
+	if err == nil {
+		t.Errorf("expected error for --version when disabled, got nil")
+	}
+}
+
+func TestNumeralShorthand(t *testing.T) {
+	fs := New("test")
+	fs.Int("verbose", "v", 0, "verbosity level")
+	fs.DisableHelp().DisableVersion() // Disable built-in flags to test -vvv
+
+	cfg, err := fs.Parse([]string{"-vvv"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	if got := cfg.Int("verbose"); got != 3 {
+		t.Errorf("expected 3, got %d", got)
+	}
+}
+
+func TestNumeralShorthandDouble(t *testing.T) {
+	fs := New("test")
+	fs.Int("debug", "d", 0, "debug level")
+
+	cfg, err := fs.Parse([]string{"-dd"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	if got := cfg.Int("debug"); got != 2 {
+		t.Errorf("expected 2, got %d", got)
+	}
+}
+
+func TestIncrementDecrement(t *testing.T) {
+	fs := New("test")
+	fs.Int("count", "c", 0, "counter")
+
+	cfg, err := fs.Parse([]string{"+c"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	if got := cfg.Int("count"); got != -1 {
+		t.Errorf("expected -1 (decrement), got %d", got)
+	}
+}
+
+func TestUsage(t *testing.T) {
+	fs := New("myapp")
+	fs.Version("1.0.0")
+	fs.String("output", "o", "output.txt", "output file")
+	fs.Int("port", "p", 8080, "listen port")
+
+	usage := fs.Usage()
+	if !strings.Contains(usage, "myapp") {
+		t.Errorf("usage should contain app name")
+	}
+	if !strings.Contains(usage, "--help") {
+		t.Errorf("usage should contain help flag")
+	}
+	if !strings.Contains(usage, "--version") {
+		t.Errorf("usage should contain version flag")
+	}
+	if !strings.Contains(usage, "output file") {
+		t.Errorf("usage should contain flag help text")
 	}
 }

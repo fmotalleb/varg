@@ -5,10 +5,17 @@
 ```go
 fs := varg.New("myapp")
 
+// Set version (enables --version flag)
+fs.Version("1.2.3")
+
 // Add flags one at a time
 fs.String("output", "o", "default.txt", "output file")
 fs.Int("port", "p", 8080, "listen port")
-fs.Bool("verbose", "v", false, "verbose output")
+fs.Int("verbose", "v", 0, "verbosity level")
+
+// Optional: disable built-in help/version
+fs.DisableHelp()
+fs.DisableVersion()
 ```
 
 ## Environment Variables
@@ -130,6 +137,54 @@ cfg, _ := fs.Parse([]string{})
 // Without → "default.conf"
 ```
 
+## Handling Help and Version
+
+```go
+fs := varg.New("myapp")
+fs.Version("1.2.3")
+fs.String("output", "o", "out.log", "output file")
+
+cfg, err := fs.Parse(os.Args[1:])
+if err != nil {
+    // Handle built-in flags
+    if err.Error() == "__HELP__" {
+        fmt.Print(fs.Usage())
+        os.Exit(0)
+    }
+    if err.Error() == "__VERSION__" {
+        fmt.Printf("myapp %s\n", "1.2.3")
+        os.Exit(0)
+    }
+    // Real errors
+    fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+    os.Exit(1)
+}
+```
+
+## Numeral Shorthand
+
+For int flags, repeat the short flag to count:
+
+```go
+fs.Int("verbose", "v", 0, "verbosity")
+
+// Usage:
+// ./app -vvv         # verbose = 3
+// ./app -vv          # verbose = 2
+// ./app -v           # verbose = 1
+```
+
+## Increment/Decrement with +
+
+Use `+` prefix to set negative value (useful for counters):
+
+```go
+fs.Int("priority", "p", 0, "priority")
+
+// Usage:
+// ./app +p            # priority = -1 (decrement)
+```
+
 ## Complete Example
 
 ```go
@@ -143,15 +198,25 @@ import (
 
 func main() {
     fs := varg.New("myapp")
+    fs.Version("1.0.0")
     
     fs.String("input", "i", "input.txt", "input file").Env("INPUT_FILE")
     fs.String("output", "o", "output.txt", "output file").Env("OUTPUT_FILE")
     fs.String("server.host", "", "localhost", "server host").EnvWithPrefix("APP")
     fs.Int("server.port", "", 8080, "server port").EnvWithPrefix("APP")
-    fs.Bool("verbose", "v", false, "verbose output")
+    fs.Int("verbose", "v", 0, "verbosity level (use -vvv for level 3)")
     
     cfg, err := fs.Parse(os.Args[1:])
     if err != nil {
+        // Handle built-in help/version flags
+        if err.Error() == "__HELP__" {
+            fmt.Print(fs.Usage())
+            os.Exit(0)
+        }
+        if err.Error() == "__VERSION__" {
+            fmt.Println("myapp version 1.0.0")
+            os.Exit(0)
+        }
         fmt.Fprintf(os.Stderr, "Error: %v\n", err)
         os.Exit(1)
     }
@@ -159,8 +224,16 @@ func main() {
     fmt.Printf("Input: %s\n", cfg.String("input"))
     fmt.Printf("Output: %s\n", cfg.String("output"))
     fmt.Printf("Server: %s:%d\n", cfg.String("server.host"), cfg.Int("server.port"))
-    fmt.Printf("Verbose: %v\n", cfg.Bool("verbose"))
+    fmt.Printf("Verbosity: %d\n", cfg.Int("verbose"))
 }
+```
+
+Usage examples:
+```bash
+./myapp --help                     # Show help
+./myapp --version                  # Show version
+./myapp -vvv --output result.txt   # Level 3 verbosity
+./myapp -v                         # Level 1 verbosity
 ```
 
 ## Environment Variable Mapping

@@ -8,10 +8,13 @@ import (
 
 // FlagSet represents a set of command-line flags.
 type FlagSet struct {
-	name         string
-	flags        map[string]*Flag
-	globalPrefix string
-	parsedValues map[string]interface{}
+	name          string
+	flags         map[string]*Flag
+	globalPrefix  string
+	parsedValues  map[string]interface{}
+	version       string
+	helpFlag      bool
+	versionFlag   bool
 }
 
 // New creates a new FlagSet with the given name.
@@ -20,6 +23,8 @@ func New(name string) *FlagSet {
 		name:         name,
 		flags:        make(map[string]*Flag),
 		parsedValues: make(map[string]interface{}),
+		helpFlag:     true,
+		versionFlag:  true,
 	}
 }
 
@@ -69,8 +74,71 @@ func (fs *FlagSet) GlobalEnvPrefix(prefix string) *FlagSet {
 	return fs
 }
 
+// Version sets the version string for --version output.
+func (fs *FlagSet) Version(v string) *FlagSet {
+	fs.version = v
+	return fs
+}
+
+// DisableHelp disables the automatic --help(-h) flag.
+func (fs *FlagSet) DisableHelp() *FlagSet {
+	fs.helpFlag = false
+	return fs
+}
+
+// DisableVersion disables the automatic --version(-v) flag.
+func (fs *FlagSet) DisableVersion() *FlagSet {
+	fs.versionFlag = false
+	return fs
+}
+
+// Usage returns a formatted usage string.
+func (fs *FlagSet) Usage() string {
+	var buf strings.Builder
+	buf.WriteString("Usage: " + fs.name + " [options]\n\n")
+	buf.WriteString("Options:\n")
+	
+	if fs.helpFlag {
+		buf.WriteString("  -h, --help            show this help message\n")
+	}
+	if fs.versionFlag && fs.version != "" {
+		buf.WriteString("  -v, --version         show version\n")
+	}
+	
+	for _, flag := range fs.flags {
+		var optStr string
+		if flag.Short != "" {
+			optStr = fmt.Sprintf("  -%s, --%s", flag.Short, flag.Key)
+		} else {
+			optStr = fmt.Sprintf("  --%s", flag.Key)
+		}
+		buf.WriteString(fmt.Sprintf("%-30s %s\n", optStr, flag.Help))
+	}
+	
+	return buf.String()
+}
+
+// parseShortNumeral counts repeated short flags (e.g., -ddd -> 3).
+// Returns the count and whether it was a numeral pattern.
+func parseShortNumeral(short string) (int, bool) {
+	if len(short) < 1 {
+		return 0, false
+	}
+	
+	// Check for all same character
+	first := short[0]
+	for _, ch := range short {
+		if ch != rune(first) {
+			return 0, false
+		}
+	}
+	
+	return len(short), true
+}
+
 // Parse parses command-line arguments and environment variables.
 // Returns a Config with resolved values following precedence: CLI > env > default.
+// Returns an error if --help or --version is requested (caller should handle display).
 func (fs *FlagSet) Parse(args []string) (*Config, error) {
 	fs.parsedValues = make(map[string]interface{})
 
@@ -87,19 +155,30 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 		if strings.HasPrefix(arg, "--") {
 			key, val, ok := strings.Cut(arg[2:], "=")
 			if !ok {
-				// Check if next arg is the value
-				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-					val = args[i+1]
-					i++
-				} else {
-					// Boolean flag or flag needing value
-					val = "true"
-				}
+				val = ""
+			}
+
+			// Check for built-in flags first
+			if key == "help" && fs.helpFlag {
+				return nil, fmt.Errorf("__HELP__")
+			}
+			if key == "version" && fs.versionFlag {
+				return nil, fmt.Errorf("__VERSION__")
 			}
 
 			flag, exists := fs.flags[key]
 			if !exists {
 				return nil, fmt.Errorf("unknown flag: --%s", key)
+			}
+
+			// If no value provided and not from =, try to get next arg
+			if val == "" && !ok {
+				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") && !strings.HasPrefix(args[i+1], "+") {
+					val = args[i+1]
+					i++
+				} else {
+					val = "true"
+				}
 			}
 
 			if err := fs.setFlagValue(cliValues, flag, key, val); err != nil {
@@ -108,11 +187,79 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 			continue
 		}
 
-		// Handle short form: -k value or -kv
-		if strings.HasPrefix(arg, "-") && len(arg) > 1 {
+		// Handle increment/decrement form: +k or -k
+		if strings.HasPrefix(arg, "+") && len(arg) > 1 {
 			short := arg[1:]
 
 			// Find flag by short form
+			var flag *Flag
+			var flagKey string
+			for k, f := range fs.flags {
+				if f.Short == short {
+					flag = f
+					flagKey = k
+					break
+				}
+			}
+
+			if flag == nil {
+				return nil, fmt.Errorf("unknown flag: +%s", short)
+			}
+
+			// +k means decrement (negative value)
+			val := "-1"
+			if err := fs.setFlagValue(cliValues, flag, flagKey, val); err != nil {
+				return nil, err
+			}
+			continue
+		}
+
+		// Handle short form: -k value or -kkk (numeral) or -k
+		if strings.HasPrefix(arg, "-") && len(arg) > 1 {
+			short := arg[1:]
+
+			// Check for numeral shorthand: -ddd means -d 3
+			if count, isNumeral := parseShortNumeral(short); isNumeral {
+				shortChar := string(short[0])
+				
+				// Check for built-in flags first
+				if shortChar == "h" && fs.helpFlag {
+					return nil, fmt.Errorf("__HELP__")
+				}
+				if shortChar == "v" && fs.versionFlag {
+					return nil, fmt.Errorf("__VERSION__")
+				}
+				
+				var flag *Flag
+				var flagKey string
+				for k, f := range fs.flags {
+					if f.Short == shortChar {
+						flag = f
+						flagKey = k
+						break
+					}
+				}
+
+				if flag == nil {
+					return nil, fmt.Errorf("unknown flag: -%s", shortChar)
+				}
+
+				val := fmt.Sprintf("%d", count)
+				if err := fs.setFlagValue(cliValues, flag, flagKey, val); err != nil {
+					return nil, err
+				}
+				continue
+			}
+
+			// Check for built-in flags first (before looking up user flags)
+			if short == "h" && fs.helpFlag {
+				return nil, fmt.Errorf("__HELP__")
+			}
+			if short == "v" && fs.versionFlag {
+				return nil, fmt.Errorf("__VERSION__")
+			}
+
+			// Regular short form
 			var flag *Flag
 			var flagKey string
 			for k, f := range fs.flags {
@@ -128,7 +275,7 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 			}
 
 			var val string
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") && !strings.HasPrefix(args[i+1], "+") {
 				val = args[i+1]
 				i++
 			} else {
