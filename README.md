@@ -66,10 +66,10 @@ DB_HOST=db.example.com ./myapp
 
 ## API Reference
 
-### varg
+### FlagSet
 
-#### `New(name string) *varg`
-Creates a new varg.
+#### `New(name string) *FlagSet`
+Creates a new FlagSet.
 
 ```go
 fs := varg.New("myapp")
@@ -111,7 +111,7 @@ fs.StringSlice("tag", "t", "tags")
 // Usage: -t foo -t bar -t baz
 ```
 
-#### `GlobalEnvPrefix(prefix string) *varg`
+#### `GlobalEnvPrefix(prefix string) *FlagSet`
 Sets a global prefix for environment variables (chaining).
 
 ```go

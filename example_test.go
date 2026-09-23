@@ -1,12 +1,11 @@
 package varg
 
 import (
-	"fmt"
-	"os"
+	"testing"
 )
 
-// ExampleBasicUsage demonstrates simple flag parsing.
-func ExampleBasicUsage() {
+// TestExampleBasicUsage demonstrates simple flag parsing.
+func TestExampleBasicUsage(t *testing.T) {
 	fs := New("myapp")
 	fs.String("output", "o", "output.log", "output file")
 	fs.Int("port", "p", 8080, "listen port")
@@ -18,36 +17,39 @@ func ExampleBasicUsage() {
 		"-v",
 	})
 
-	fmt.Println("Output:", cfg.String("output"))
-	fmt.Println("Port:", cfg.Int("port"))
-	fmt.Println("Verbose:", cfg.Bool("verbose"))
-	// Output:
-	// Output: custom.log
-	// Port: 9000
-	// Verbose: true
+	if cfg.String("output") != "custom.log" {
+		t.Errorf("output mismatch")
+	}
+	if cfg.Int("port") != 9000 {
+		t.Errorf("port mismatch")
+	}
+	if !cfg.Bool("verbose") {
+		t.Errorf("verbose mismatch")
+	}
 }
 
-// ExampleEnvironmentVariables demonstrates env var support with custom names.
-func ExampleEnvironmentVariables() {
+// TestExampleEnvironmentVariables demonstrates env var support with custom names.
+func TestExampleEnvironmentVariables(t *testing.T) {
 	fs := New("myapp")
 	fs.String("output", "o", "output.log", "output file").Env("OUTPUT_FILE")
 	fs.Int("port", "p", 8080, "listen port").Env("PORT")
 
-	os.Setenv("OUTPUT_FILE", "env-output.log")
-	os.Setenv("PORT", "3000")
+	t.Setenv("OUTPUT_FILE", "env-output.log")
+	t.Setenv("PORT", "3000")
 
 	// No CLI args; values come from env
 	cfg, _ := fs.Parse([]string{})
 
-	fmt.Println("Output:", cfg.String("output"))
-	fmt.Println("Port:", cfg.Int("port"))
-	// Output:
-	// Output: env-output.log
-	// Port: 3000
+	if cfg.String("output") != "env-output.log" {
+		t.Errorf("output from env mismatch")
+	}
+	if cfg.Int("port") != 3000 {
+		t.Errorf("port from env mismatch")
+	}
 }
 
-// ExampleNestedKeys demonstrates dot notation and env var translation.
-func ExampleNestedKeys() {
+// TestExampleNestedKeys demonstrates dot notation and env var translation.
+func TestExampleNestedKeys(t *testing.T) {
 	fs := New("myapp")
 
 	// Nested keys use dots; env vars use double underscores
@@ -56,27 +58,30 @@ func ExampleNestedKeys() {
 	fs.String("db.host", "", "localhost", "db host").EnvWithPrefix("APP")
 	fs.Int("db.port", "", 5432, "db port").EnvWithPrefix("APP")
 
-	os.Setenv("APP_SERVER__HOST", "api.example.com")
-	os.Setenv("APP_SERVER__PORT", "9000")
+	t.Setenv("APP_SERVER__HOST", "api.example.com")
+	t.Setenv("APP_SERVER__PORT", "9000")
 
 	cfg, _ := fs.Parse([]string{
 		"--db.host", "postgres.example.com",
 		"--db.port", "5433",
 	})
 
-	fmt.Println("Server Host:", cfg.String("server.host"))
-	fmt.Println("Server Port:", cfg.Int("server.port"))
-	fmt.Println("DB Host:", cfg.String("db.host"))
-	fmt.Println("DB Port:", cfg.Int("db.port"))
-	// Output:
-	// Server Host: api.example.com
-	// Server Port: 9000
-	// DB Host: postgres.example.com
-	// DB Port: 5433
+	if cfg.String("server.host") != "api.example.com" {
+		t.Errorf("server.host mismatch")
+	}
+	if cfg.Int("server.port") != 9000 {
+		t.Errorf("server.port mismatch")
+	}
+	if cfg.String("db.host") != "postgres.example.com" {
+		t.Errorf("db.host mismatch")
+	}
+	if cfg.Int("db.port") != 5433 {
+		t.Errorf("db.port mismatch")
+	}
 }
 
-// ExampleStructUnmarshal demonstrates unmarshaling into structs with tags.
-func ExampleStructUnmarshal() {
+// TestExampleStructUnmarshal demonstrates unmarshaling into structs with tags.
+func TestExampleStructUnmarshal(t *testing.T) {
 	fs := New("myapp")
 	fs.String("server.host", "", "localhost", "server host")
 	fs.Int("server.port", "", 8080, "server port")
@@ -105,17 +110,22 @@ func ExampleStructUnmarshal() {
 
 	cfg.Unmarshal(&config)
 
-	fmt.Printf("Server: %s:%d\n", config.Server.Host, config.Server.Port)
-	fmt.Printf("DB: %s:%d\n", config.DB.Host, config.DB.Port)
-	fmt.Printf("Debug: %v\n", config.Debug)
-	// Output:
-	// Server: api.dev.local:3000
-	// DB: db.dev.local:5432
-	// Debug: true
+	if config.Server.Host != "api.dev.local" {
+		t.Errorf("server.host mismatch")
+	}
+	if config.Server.Port != 3000 {
+		t.Errorf("server.port mismatch")
+	}
+	if config.DB.Host != "db.dev.local" {
+		t.Errorf("db.host mismatch")
+	}
+	if !config.Debug {
+		t.Errorf("debug mismatch")
+	}
 }
 
-// ExampleStringSlice demonstrates repeatable flags.
-func ExampleStringSlice() {
+// TestExampleStringSlice demonstrates repeatable flags.
+func TestExampleStringSlice(t *testing.T) {
 	fs := New("myapp")
 	fs.StringSlice("tag", "t", "tags to apply")
 
@@ -126,32 +136,34 @@ func ExampleStringSlice() {
 	})
 
 	tags := cfg.StringSlice("tag")
-	fmt.Println("Tags:", tags)
-	// Output:
-	// Tags: [important urgent review]
+	if len(tags) != 3 || tags[0] != "important" {
+		t.Errorf("tags mismatch")
+	}
 }
 
-// ExamplePrecedence demonstrates CLI > env > default precedence.
-func ExamplePrecedence() {
+// TestExamplePrecedence demonstrates CLI > env > default precedence.
+func TestExamplePrecedence(t *testing.T) {
 	fs := New("myapp")
 	fs.String("config", "c", "default.conf", "config file").Env("CONFIG_FILE")
 
-	os.Setenv("CONFIG_FILE", "env.conf")
+	t.Setenv("CONFIG_FILE", "env.conf")
 
 	// CLI argument takes precedence
 	cfg, _ := fs.Parse([]string{"--config", "cli.conf"})
-	fmt.Println("With CLI arg:", cfg.String("config"))
+	if cfg.String("config") != "cli.conf" {
+		t.Errorf("CLI precedence failed")
+	}
 
 	// Env var is used when no CLI arg
 	cfg, _ = fs.Parse([]string{})
-	fmt.Println("With env var:", cfg.String("config"))
+	if cfg.String("config") != "env.conf" {
+		t.Errorf("env precedence failed")
+	}
 
 	// Default is used when nothing else
-	os.Unsetenv("CONFIG_FILE")
+	t.Setenv("CONFIG_FILE", "")
 	cfg, _ = fs.Parse([]string{})
-	fmt.Println("With default:", cfg.String("config"))
-	// Output:
-	// With CLI arg: cli.conf
-	// With env var: env.conf
-	// With default: default.conf
+	if cfg.String("config") != "default.conf" {
+		t.Errorf("default precedence failed")
+	}
 }

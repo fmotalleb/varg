@@ -6,17 +6,17 @@ import (
 	"strings"
 )
 
-// varg represents a set of command-line flags.
-type varg struct {
+// FlagSet represents a set of command-line flags.
+type FlagSet struct {
 	name         string
 	flags        map[string]*Flag
 	globalPrefix string
 	parsedValues map[string]interface{}
 }
 
-// New creates a new varg with the given name.
-func New(name string) *varg {
-	return &varg{
+// New creates a new FlagSet with the given name.
+func New(name string) *FlagSet {
+	return &FlagSet{
 		name:         name,
 		flags:        make(map[string]*Flag),
 		parsedValues: make(map[string]interface{}),
@@ -24,31 +24,31 @@ func New(name string) *varg {
 }
 
 // String adds a string flag to the set.
-func (fs *varg) String(key, short, defaultVal, help string) *Flag {
+func (fs *FlagSet) String(key, short, defaultVal, help string) *Flag {
 	return fs.addFlag(key, short, defaultVal, help, TypeString)
 }
 
 // Int adds an int flag to the set.
-func (fs *varg) Int(key, short string, defaultVal int, help string) *Flag {
+func (fs *FlagSet) Int(key, short string, defaultVal int, help string) *Flag {
 	return fs.addFlag(key, short, defaultVal, help, TypeInt)
 }
 
 // Bool adds a bool flag to the set.
-func (fs *varg) Bool(key, short string, defaultVal bool, help string) *Flag {
+func (fs *FlagSet) Bool(key, short string, defaultVal bool, help string) *Flag {
 	return fs.addFlag(key, short, defaultVal, help, TypeBool)
 }
 
 // Float64 adds a float64 flag to the set.
-func (fs *varg) Float64(key, short string, defaultVal float64, help string) *Flag {
+func (fs *FlagSet) Float64(key, short string, defaultVal float64, help string) *Flag {
 	return fs.addFlag(key, short, defaultVal, help, TypeFloat64)
 }
 
 // StringSlice adds a string slice flag to the set (repeatable: -tag foo -tag bar).
-func (fs *varg) StringSlice(key, short string, help string) *Flag {
+func (fs *FlagSet) StringSlice(key, short string, help string) *Flag {
 	return fs.addFlag(key, short, []string{}, help, TypeStringSlice)
 }
 
-func (fs *varg) addFlag(key, short string, defaultVal interface{}, help string, typ Type) *Flag {
+func (fs *FlagSet) addFlag(key, short string, defaultVal interface{}, help string, typ Type) *Flag {
 	flag := &Flag{
 		Key:      key,
 		Short:    short,
@@ -64,14 +64,14 @@ func (fs *varg) addFlag(key, short string, defaultVal interface{}, help string, 
 
 // GlobalEnvPrefix sets a prefix for all env vars (e.g., "MYAPP_").
 // Individual flag env vars will be appended to this.
-func (fs *varg) GlobalEnvPrefix(prefix string) *varg {
+func (fs *FlagSet) GlobalEnvPrefix(prefix string) *FlagSet {
 	fs.globalPrefix = prefix
 	return fs
 }
 
 // Parse parses command-line arguments and environment variables.
 // Returns a Config with resolved values following precedence: CLI > env > default.
-func (fs *varg) Parse(args []string) (*Config, error) {
+func (fs *FlagSet) Parse(args []string) (*Config, error) {
 	fs.parsedValues = make(map[string]interface{})
 
 	// First pass: collect all CLI arguments
@@ -156,7 +156,7 @@ func (fs *varg) Parse(args []string) (*Config, error) {
 		// Priority 2: Environment variable
 		if !found {
 			if flag.EnvVar != "" {
-				if envVal, ok := os.LookupEnv(flag.EnvVar); ok {
+				if envVal, ok := os.LookupEnv(flag.EnvVar); ok && envVal != "" {
 					var err error
 					value, err = convertValue(envVal, flag.Type)
 					if err != nil {
@@ -181,7 +181,7 @@ func (fs *varg) Parse(args []string) (*Config, error) {
 	}, nil
 }
 
-func (fs *varg) setFlagValue(target map[string]interface{}, flag *Flag, key, val string) error {
+func (fs *FlagSet) setFlagValue(target map[string]interface{}, flag *Flag, key, val string) error {
 	converted, err := convertValue(val, flag.Type)
 	if err != nil {
 		return fmt.Errorf("error parsing flag %s: %w", key, err)
