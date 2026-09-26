@@ -1,6 +1,7 @@
 package varg
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -607,5 +608,284 @@ func TestUsage(t *testing.T) {
 	}
 	if !strings.Contains(usage, "output file") {
 		t.Errorf("usage should contain flag help text")
+	}
+}
+
+func TestNumericFlagTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		add  func(fs *FlagSet)
+		get  func(cfg *Config) interface{}
+		args []string
+		want interface{}
+	}{
+		{"int", func(fs *FlagSet) { fs.Int("v", "", 0, "") }, func(c *Config) interface{} { return c.Int("v") }, []string{"--v", "-42"}, int(-42)},
+		{"int8", func(fs *FlagSet) { fs.Int8("v", "", 0, "") }, func(c *Config) interface{} { return c.Int8("v") }, []string{"--v", "-42"}, int8(-42)},
+		{"int16", func(fs *FlagSet) { fs.Int16("v", "", 0, "") }, func(c *Config) interface{} { return c.Int16("v") }, []string{"--v", "-30000"}, int16(-30000)},
+		{"int32", func(fs *FlagSet) { fs.Int32("v", "", 0, "") }, func(c *Config) interface{} { return c.Int32("v") }, []string{"--v", "-70000"}, int32(-70000)},
+		{"int64", func(fs *FlagSet) { fs.Int64("v", "", 0, "") }, func(c *Config) interface{} { return c.Int64("v") }, []string{"--v", "1099511627776"}, int64(1099511627776)},
+		{"uint", func(fs *FlagSet) { fs.Uint("v", "", 0, "") }, func(c *Config) interface{} { return c.Uint("v") }, []string{"--v", "42"}, uint(42)},
+		{"uint8", func(fs *FlagSet) { fs.Uint8("v", "", 0, "") }, func(c *Config) interface{} { return c.Uint8("v") }, []string{"--v", "255"}, uint8(255)},
+		{"uint16", func(fs *FlagSet) { fs.Uint16("v", "", 0, "") }, func(c *Config) interface{} { return c.Uint16("v") }, []string{"--v", "65535"}, uint16(65535)},
+		{"uint32", func(fs *FlagSet) { fs.Uint32("v", "", 0, "") }, func(c *Config) interface{} { return c.Uint32("v") }, []string{"--v", "4000000000"}, uint32(4000000000)},
+		{"uint64", func(fs *FlagSet) { fs.Uint64("v", "", 0, "") }, func(c *Config) interface{} { return c.Uint64("v") }, []string{"--v", "1152921504606846976"}, uint64(1152921504606846976)},
+		{"float32", func(fs *FlagSet) { fs.Float32("v", "", 0, "") }, func(c *Config) interface{} { return c.Float32("v") }, []string{"--v", "1.5"}, float32(1.5)},
+		{"float64", func(fs *FlagSet) { fs.Float64("v", "", 0, "") }, func(c *Config) interface{} { return c.Float64("v") }, []string{"--v", "2.25"}, float64(2.25)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := New("test")
+			tc.add(fs)
+
+			cfg, err := fs.Parse(tc.args)
+			if err != nil {
+				t.Fatalf("parse failed: %v", err)
+			}
+
+			if got, ok := cfg.Get("v"); !ok || got != tc.want {
+				t.Errorf("Get: got %v (%T), want %v (%T)", got, got, tc.want, tc.want)
+			}
+			if got := tc.get(cfg); got != tc.want {
+				t.Errorf("getter: got %v (%T), want %v (%T)", got, got, tc.want, tc.want)
+			}
+		})
+	}
+}
+
+func TestNumericOutOfRange(t *testing.T) {
+	fs := New("test")
+	fs.Int8("small", "", 0, "")
+	if _, err := fs.Parse([]string{"--small", "300"}); err == nil {
+		t.Errorf("expected error for int8 out of range")
+	}
+	if _, err := fs.Parse([]string{"--small", "42"}); err != nil {
+		t.Errorf("parse failed: %v", err)
+	}
+
+	fs = New("test")
+	fs.Uint8("byte", "", 0, "")
+	if _, err := fs.Parse([]string{"--byte", "256"}); err == nil {
+		t.Errorf("expected error for uint8 out of range")
+	}
+	if _, err := fs.Parse([]string{"--byte", "-1"}); err == nil {
+		t.Errorf("expected error for negative uint8")
+	}
+}
+
+func TestNumericNegativeValue(t *testing.T) {
+	fs := New("test")
+	fs.Int("port", "p", 8080, "")
+	fs.Int64("delta", "", 0, "")
+
+	cfg, err := fs.Parse([]string{"--port", "-1", "--delta", "-5"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if cfg.Int("port") != -1 {
+		t.Errorf("port: expected -1, got %d", cfg.Int("port"))
+	}
+	if cfg.Int64("delta") != -5 {
+		t.Errorf("delta: expected -5, got %d", cfg.Int64("delta"))
+	}
+}
+
+func TestNumericShorthandAcrossTypes(t *testing.T) {
+	fs := New("test")
+	fs.Int64("verbose", "v", 0, "")
+	fs.Uint8("debug", "d", 0, "")
+	fs.Float32("factor", "f", 0, "")
+	fs.Uint16("retries", "r", 10, "")
+
+	cfg, err := fs.Parse([]string{"-v", "-v", "-vv", "-d", "-d", "-f", "-f", "-r"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if cfg.Int64("verbose") != 4 {
+		t.Errorf("verbose: expected 4, got %d", cfg.Int64("verbose"))
+	}
+	if cfg.Uint8("debug") != 2 {
+		t.Errorf("debug: expected 2, got %d", cfg.Uint8("debug"))
+	}
+	if cfg.Float32("factor") != 2 {
+		t.Errorf("factor: expected 2, got %v", cfg.Float32("factor"))
+	}
+	if cfg.Uint16("retries") != 11 {
+		t.Errorf("retries: expected 11 (default 10 + 1), got %d", cfg.Uint16("retries"))
+	}
+}
+
+func TestUnsignedCannotBeDecremented(t *testing.T) {
+	fs := New("test")
+	fs.Uint("count", "c", 0, "")
+
+	if _, err := fs.Parse([]string{"+c"}); err == nil {
+		t.Errorf("expected error when decrementing a uint flag")
+	}
+}
+
+func TestUnmarshalNumericTypes(t *testing.T) {
+	fs := New("test")
+	fs.Int64("id", "", int64(0), "")
+	fs.Uint16("mask", "", uint16(0), "")
+	fs.Float32("ratio", "", float32(0), "")
+	fs.Int("port", "", 0, "")
+
+	cfg, err := fs.Parse([]string{
+		"--id", "1099511627776",
+		"--mask", "65535",
+		"--ratio", "0.25",
+		"--port", "8080",
+	})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	var s struct {
+		ID    int64   `flag:"id"`
+		Mask  uint16  `flag:"mask"`
+		Ratio float32 `flag:"ratio"`
+		Port  int64   `flag:"port"`
+	}
+	if err := cfg.Unmarshal(&s); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if s.ID != 1099511627776 {
+		t.Errorf("id: expected 1099511627776, got %d", s.ID)
+	}
+	if s.Mask != 65535 {
+		t.Errorf("mask: expected 65535, got %d", s.Mask)
+	}
+	if s.Ratio != 0.25 {
+		t.Errorf("ratio: expected 0.25, got %v", s.Ratio)
+	}
+	if s.Port != 8080 {
+		t.Errorf("port: expected 8080, got %d", s.Port)
+	}
+
+	var tooSmall struct {
+		Port int8 `flag:"port"`
+	}
+	if err := cfg.Unmarshal(&tooSmall); err == nil {
+		t.Errorf("expected out of range error for int8 field")
+	}
+}
+
+func TestHandleHelp(t *testing.T) {
+	fs := New("myapp")
+	fs.String("output", "o", "out.txt", "output file")
+
+	res := fs.Handle([]string{"--help"})
+	if !res.ShouldExit {
+		t.Errorf("expected ShouldExit")
+	}
+	if res.Err != nil {
+		t.Errorf("expected no error for help, got %v", res.Err)
+	}
+	if res.Config != nil {
+		t.Errorf("expected nil config for help")
+	}
+	if res.Output != res.Help {
+		t.Errorf("expected output to be the help text")
+	}
+	if !strings.Contains(res.Output, "Usage: myapp") {
+		t.Errorf("help output missing usage line: %q", res.Output)
+	}
+}
+
+func TestHandleVersion(t *testing.T) {
+	fs := New("myapp")
+	fs.Version("1.2.3")
+
+	res := fs.Handle([]string{"-v"})
+	if !res.ShouldExit {
+		t.Errorf("expected ShouldExit")
+	}
+	if res.Err != nil {
+		t.Errorf("expected no error for version, got %v", res.Err)
+	}
+	if res.Output != "myapp 1.2.3\n" {
+		t.Errorf("version output: got %q", res.Output)
+	}
+	if res.Version != "1.2.3" {
+		t.Errorf("expected retrievable version 1.2.3, got %q", res.Version)
+	}
+}
+
+func TestHandleSuccess(t *testing.T) {
+	fs := New("myapp")
+	fs.Version("1.2.3")
+	fs.Int("port", "p", 8080, "listen port")
+
+	res := fs.Handle([]string{"--port", "9000"})
+	if res.ShouldExit {
+		t.Errorf("expected ShouldExit to be false")
+	}
+	if res.Err != nil {
+		t.Errorf("expected no error, got %v", res.Err)
+	}
+	if res.Config == nil {
+		t.Fatalf("expected a config")
+	}
+	if res.Config.Int("port") != 9000 {
+		t.Errorf("port: expected 9000, got %d", res.Config.Int("port"))
+	}
+	if res.Version != "1.2.3" {
+		t.Errorf("expected retrievable version, got %q", res.Version)
+	}
+	if res.Help == "" {
+		t.Errorf("expected help text to be available")
+	}
+}
+
+func TestHandleError(t *testing.T) {
+	fs := New("myapp")
+	fs.String("output", "o", "out.txt", "output file")
+
+	res := fs.Handle([]string{"--nope", "x"})
+	if !res.ShouldExit {
+		t.Errorf("expected ShouldExit")
+	}
+	if res.Err == nil {
+		t.Errorf("expected an error")
+	}
+	if res.Config != nil {
+		t.Errorf("expected nil config on failure")
+	}
+	if !strings.Contains(res.Output, "unknown flag") {
+		t.Errorf("output should carry the error message, got %q", res.Output)
+	}
+}
+
+func TestSentinelErrors(t *testing.T) {
+	fs := New("test")
+	fs.Version("1.0.0")
+
+	if _, err := fs.Parse([]string{"--help"}); !errors.Is(err, ErrHelp) {
+		t.Errorf("expected ErrHelp, got %v", err)
+	}
+	if _, err := fs.Parse([]string{"-v"}); !errors.Is(err, ErrVersion) {
+		t.Errorf("expected ErrVersion, got %v", err)
+	}
+}
+
+func TestUsageShowsEnvVars(t *testing.T) {
+	fs := New("myapp")
+	fs.String("output", "o", "out.txt", "output file").Env("OUTPUT_FILE")
+	fs.Int("server.port", "", 8080, "server port").EnvWithPrefix("APP")
+	fs.String("plain", "", "x", "no env here")
+
+	usage := fs.Usage()
+	if !strings.Contains(usage, "output file [$OUTPUT_FILE]") {
+		t.Errorf("usage should show the env var of a flag, got:\n%s", usage)
+	}
+	if !strings.Contains(usage, "server port [$APP_SERVER__PORT]") {
+		t.Errorf("usage should show the prefixed env var, got:\n%s", usage)
+	}
+	if !strings.Contains(usage, "no env here\n") {
+		t.Errorf("usage should keep help text of a flag without env var, got:\n%s", usage)
+	}
+	if strings.Contains(usage, "no env here [$") {
+		t.Errorf("flag without env var must not show an env suffix, got:\n%s", usage)
 	}
 }

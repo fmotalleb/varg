@@ -90,7 +90,14 @@ Useful for decrements or negative adjustments.
 - `Version(v string) *FlagSet` — Set version string
 - `DisableHelp() *FlagSet` — Disable automatic --help flag
 - `DisableVersion() *FlagSet` — Disable automatic --version flag
-- `Usage() string` — Get formatted help text
+- `Usage() string` — Get formatted help text (shows `[$ENV_VAR]` per flag)
+- `Handle(args []string) Result` — Parse and resolve help/version in one call
+
+### Numeric Types
+
+`Int8/Int16/Int32/Int64`, `Uint/Uint8/Uint16/Uint32/Uint64` and `Float32` are
+available next to `Int` and `Float64`, with matching getters on `Config`.
+Counting and incrementing work for every numeric type (`-vvv` == `-v -v -v`).
 
 ### Parse Error Handling
 
