@@ -200,6 +200,22 @@ func TestExampleNumeralShorthand(t *testing.T) {
 	}
 }
 
+// TestExampleNumeralShorthandMulti demonstrates -v -v -v shorthand.
+func TestExampleNumeralShorthandMulti(t *testing.T) {
+	fs := New("myapp")
+	fs.Int("verbose", "v", 0, "verbosity level")
+	fs.DisableHelp().DisableVersion()
+
+	cfg, err := fs.Parse([]string{"-v", "-v", "-v"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	if cfg.Int("verbose") != 3 {
+		t.Errorf("expected 3, got %d", cfg.Int("verbose"))
+	}
+}
+
 // TestExampleIncrement demonstrates increment/decrement with +flag.
 func TestExampleIncrement(t *testing.T) {
 	fs := New("myapp")
