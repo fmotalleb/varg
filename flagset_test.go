@@ -493,6 +493,102 @@ func TestIncrementDecrement(t *testing.T) {
 	}
 }
 
+func TestShortFlagOverridesBuiltInVersion(t *testing.T) {
+	fs := New("test")
+	fs.Version("1.0.0")
+	fs.Int("verbose", "v", 0, "verbosity level")
+
+	cfg, err := fs.Parse([]string{"-vvv"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if got := cfg.Int("verbose"); got != 3 {
+		t.Errorf("expected 3, got %d", got)
+	}
+
+	// The long name still belongs to the built-in version flag.
+	_, err = fs.Parse([]string{"--version"})
+	if err == nil || err.Error() != "__VERSION__" {
+		t.Errorf("expected __VERSION__ error, got %v", err)
+	}
+}
+
+func TestLongFlagOverridesBuiltInVersion(t *testing.T) {
+	fs := New("test")
+	fs.Version("1.0.0")
+	fs.String("version", "", "app", "version source")
+
+	cfg, err := fs.Parse([]string{"--version", "cli"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if got := cfg.String("version"); got != "cli" {
+		t.Errorf("expected 'cli', got '%s'", got)
+	}
+
+	// The short name still belongs to the built-in version flag.
+	_, err = fs.Parse([]string{"-v"})
+	if err == nil || err.Error() != "__VERSION__" {
+		t.Errorf("expected __VERSION__ error, got %v", err)
+	}
+}
+
+func TestShortFlagOverridesBuiltInHelp(t *testing.T) {
+	fs := New("test")
+	fs.Bool("human", "h", false, "human readable output")
+
+	cfg, err := fs.Parse([]string{"-h"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if !cfg.Bool("human") {
+		t.Errorf("expected human readable output to be enabled")
+	}
+
+	_, err = fs.Parse([]string{"--help"})
+	if err == nil || err.Error() != "__HELP__" {
+		t.Errorf("expected __HELP__ error, got %v", err)
+	}
+}
+
+func TestDisableHelpKeepsOverriddenShort(t *testing.T) {
+	fs := New("test")
+	fs.Bool("human", "h", false, "human readable output")
+	fs.DisableHelp()
+
+	cfg, err := fs.Parse([]string{"-h"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if !cfg.Bool("human") {
+		t.Errorf("expected human readable output to be enabled")
+	}
+
+	if _, err = fs.Parse([]string{"--help"}); err == nil {
+		t.Errorf("expected error for --help when disabled")
+	}
+}
+
+func TestRepeatedShortMatchesNumeralShorthand(t *testing.T) {
+	fs := New("test")
+	fs.Version("1.0.0")
+	fs.Int("verbose", "v", 0, "verbosity level")
+
+	repeated, err := fs.Parse([]string{"-v", "-v", "-v"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	numeral, err := fs.Parse([]string{"-vvv"})
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	if repeated.Int("verbose") != numeral.Int("verbose") || repeated.Int("verbose") != 3 {
+		t.Errorf("expected both forms to give 3, got %d and %d", repeated.Int("verbose"), numeral.Int("verbose"))
+	}
+}
+
 func TestUsage(t *testing.T) {
 	fs := New("myapp")
 	fs.Version("1.0.0")

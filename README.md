@@ -400,6 +400,7 @@ cfg, _ = fs.Parse([]string{})
 For int flags, repeated short flags count automatically:
 ```bash
 ./app -vvv          # Same as -v 3
+./app -v -v -v      # Same as -vvv
 ./app -dd           # Same as -d 2
 ```
 
@@ -420,6 +421,13 @@ Automatically available (unless disabled):
 ./app -h            # Short form
 ./app --version     # Show version (if set with .Version())
 ./app -v            # Short form
+```
+
+Registrations are override based — the last registration of a name wins.
+Declaring your own flag after a built-in takes over its name:
+```go
+fs.Version("1.0.0")                    // claims --version and -v
+fs.Int("verbose", "v", 0, "verbosity") // -v now counts, --version still prints
 ```
 
 ## Environment Variable Naming
