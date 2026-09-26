@@ -83,7 +83,7 @@ func (c *Config) StringSlice(key string) []string {
 //	}
 func (c *Config) Unmarshal(v interface{}) error {
 	val := reflect.ValueOf(v)
-	if val.Kind() != reflect.Ptr {
+	if val.Kind() != reflect.Pointer {
 		return fmt.Errorf("unmarshal target must be a pointer")
 	}
 

@@ -8,13 +8,13 @@ import (
 
 // FlagSet represents a set of command-line flags.
 type FlagSet struct {
-	name          string
-	flags         map[string]*Flag
-	globalPrefix  string
-	parsedValues  map[string]interface{}
-	version       string
-	helpFlag      bool
-	versionFlag   bool
+	name         string
+	flags        map[string]*Flag
+	globalPrefix string
+	parsedValues map[string]interface{}
+	version      string
+	helpFlag     bool
+	versionFlag  bool
 }
 
 // New creates a new FlagSet with the given name.
@@ -24,7 +24,7 @@ func New(name string) *FlagSet {
 		flags:        make(map[string]*Flag),
 		parsedValues: make(map[string]interface{}),
 		helpFlag:     true,
-		versionFlag:  true,
+		versionFlag:  false,
 	}
 }
 
@@ -77,6 +77,7 @@ func (fs *FlagSet) GlobalEnvPrefix(prefix string) *FlagSet {
 // Version sets the version string for --version output.
 func (fs *FlagSet) Version(v string) *FlagSet {
 	fs.version = v
+	fs.versionFlag = true
 	return fs
 }
 
@@ -97,14 +98,14 @@ func (fs *FlagSet) Usage() string {
 	var buf strings.Builder
 	buf.WriteString("Usage: " + fs.name + " [options]\n\n")
 	buf.WriteString("Options:\n")
-	
+
 	if fs.helpFlag {
 		buf.WriteString("  -h, --help            show this help message\n")
 	}
 	if fs.versionFlag && fs.version != "" {
 		buf.WriteString("  -v, --version         show version\n")
 	}
-	
+
 	for _, flag := range fs.flags {
 		var optStr string
 		if flag.Short != "" {
@@ -112,27 +113,26 @@ func (fs *FlagSet) Usage() string {
 		} else {
 			optStr = fmt.Sprintf("  --%s", flag.Key)
 		}
-		buf.WriteString(fmt.Sprintf("%-30s %s\n", optStr, flag.Help))
+		fmt.Fprintf(&buf, "%-30s %s\n", optStr, flag.Help)
 	}
-	
+
 	return buf.String()
 }
 
 // parseShortNumeral counts repeated short flags (e.g., -ddd -> 3).
 // Returns the count and whether it was a numeral pattern.
 func parseShortNumeral(short string) (int, bool) {
-	if len(short) < 1 {
+	if len(short) < 2 {
 		return 0, false
 	}
-	
-	// Check for all same character
+
 	first := short[0]
-	for _, ch := range short {
-		if ch != rune(first) {
+	for i := 1; i < len(short); i++ {
+		if short[i] != first {
 			return 0, false
 		}
 	}
-	
+
 	return len(short), true
 }
 
@@ -218,18 +218,11 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 		if strings.HasPrefix(arg, "-") && len(arg) > 1 {
 			short := arg[1:]
 
-			// Check for numeral shorthand: -ddd means -d 3
+			// Check for numeral shorthand: -ddd means -d 3.
+			// Only numeric flags support this syntax.
 			if count, isNumeral := parseShortNumeral(short); isNumeral {
 				shortChar := string(short[0])
-				
-				// Check for built-in flags first
-				if shortChar == "h" && fs.helpFlag {
-					return nil, fmt.Errorf("__HELP__")
-				}
-				if shortChar == "v" && fs.versionFlag {
-					return nil, fmt.Errorf("__VERSION__")
-				}
-				
+
 				var flag *Flag
 				var flagKey string
 				for k, f := range fs.flags {
@@ -244,11 +237,15 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 					return nil, fmt.Errorf("unknown flag: -%s", shortChar)
 				}
 
-				val := fmt.Sprintf("%d", count)
-				if err := fs.setFlagValue(cliValues, flag, flagKey, val); err != nil {
-					return nil, err
+				if flag.Type == TypeInt || flag.Type == TypeFloat64 {
+					val := fmt.Sprintf("%d", count)
+					if err := fs.setFlagValue(cliValues, flag, flagKey, val); err != nil {
+						return nil, err
+					}
+					continue
 				}
-				continue
+
+				// Not a numeric flag, so interpret it as a normal short flag.
 			}
 
 			// Check for built-in flags first (before looking up user flags)
@@ -327,22 +324,25 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 		flags:  fs.flags,
 	}, nil
 }
-
 func (fs *FlagSet) setFlagValue(target map[string]interface{}, flag *Flag, key, val string) error {
 	converted, err := convertValue(val, flag.Type)
 	if err != nil {
 		return fmt.Errorf("error parsing flag %s: %w", key, err)
 	}
 
-	// For slice types, append to existing slice
 	if flag.Type == TypeStringSlice {
-		if existing, ok := target[key]; ok {
-			if slice, ok := existing.([]string); ok {
-				target[key] = append(slice, val)
-				return nil
-			}
+		existing, ok := target[key]
+		if !ok {
+			target[key] = existing.([]string)
+			return nil
 		}
-		target[key] = []string{val}
+
+		slice, ok := existing.([]string)
+		if !ok {
+			return fmt.Errorf("invalid existing value for string slice flag %s", key)
+		}
+
+		target[key] = append(slice, converted.([]string)...)
 		return nil
 	}
 
