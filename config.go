@@ -18,6 +18,46 @@ func (c *Config) Get(key string) (interface{}, bool) {
 	return val, ok
 }
 
+// asInt64 converts val to an int64 when it holds an integer value.
+// Unsigned values that do not fit in an int64 report false.
+func asInt64(val interface{}) (int64, bool) {
+	switch rv := reflect.ValueOf(val); rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int(), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if u := rv.Uint(); u <= 1<<63-1 {
+			return int64(u), true
+		}
+	}
+	return 0, false
+}
+
+// asUint64 converts val to a uint64 when it holds a non-negative integer.
+func asUint64(val interface{}) (uint64, bool) {
+	switch rv := reflect.ValueOf(val); rv.Kind() {
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return rv.Uint(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if v := rv.Int(); v >= 0 {
+			return uint64(v), true
+		}
+	}
+	return 0, false
+}
+
+// asFloat64 converts val to a float64 when it holds a number.
+func asFloat64(val interface{}) (float64, bool) {
+	switch rv := reflect.ValueOf(val); rv.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return rv.Float(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(rv.Int()), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return float64(rv.Uint()), true
+	}
+	return 0, false
+}
+
 // String returns the string value for a key.
 func (c *Config) String(key string) string {
 	if val, ok := c.values[key]; ok {
@@ -30,12 +70,80 @@ func (c *Config) String(key string) string {
 
 // Int returns the int value for a key.
 func (c *Config) Int(key string) int {
-	if val, ok := c.values[key]; ok {
-		if i, ok := val.(int); ok {
-			return i
-		}
+	v, _ := asInt64(c.values[key])
+	return int(v)
+}
+
+// Int8 returns the int8 value for a key, or 0 when it does not fit.
+func (c *Config) Int8(key string) int8 {
+	v, ok := asInt64(c.values[key])
+	if !ok || int64(int8(v)) != v {
+		return 0
 	}
-	return 0
+	return int8(v)
+}
+
+// Int16 returns the int16 value for a key, or 0 when it does not fit.
+func (c *Config) Int16(key string) int16 {
+	v, ok := asInt64(c.values[key])
+	if !ok || int64(int16(v)) != v {
+		return 0
+	}
+	return int16(v)
+}
+
+// Int32 returns the int32 value for a key, or 0 when it does not fit.
+func (c *Config) Int32(key string) int32 {
+	v, ok := asInt64(c.values[key])
+	if !ok || int64(int32(v)) != v {
+		return 0
+	}
+	return int32(v)
+}
+
+// Int64 returns the int64 value for a key.
+func (c *Config) Int64(key string) int64 {
+	v, _ := asInt64(c.values[key])
+	return v
+}
+
+// Uint returns the uint value for a key.
+func (c *Config) Uint(key string) uint {
+	v, _ := asUint64(c.values[key])
+	return uint(v)
+}
+
+// Uint8 returns the uint8 value for a key, or 0 when it does not fit.
+func (c *Config) Uint8(key string) uint8 {
+	v, ok := asUint64(c.values[key])
+	if !ok || uint64(uint8(v)) != v {
+		return 0
+	}
+	return uint8(v)
+}
+
+// Uint16 returns the uint16 value for a key, or 0 when it does not fit.
+func (c *Config) Uint16(key string) uint16 {
+	v, ok := asUint64(c.values[key])
+	if !ok || uint64(uint16(v)) != v {
+		return 0
+	}
+	return uint16(v)
+}
+
+// Uint32 returns the uint32 value for a key, or 0 when it does not fit.
+func (c *Config) Uint32(key string) uint32 {
+	v, ok := asUint64(c.values[key])
+	if !ok || uint64(uint32(v)) != v {
+		return 0
+	}
+	return uint32(v)
+}
+
+// Uint64 returns the uint64 value for a key.
+func (c *Config) Uint64(key string) uint64 {
+	v, _ := asUint64(c.values[key])
+	return v
 }
 
 // Bool returns the bool value for a key.
@@ -48,14 +156,22 @@ func (c *Config) Bool(key string) bool {
 	return false
 }
 
+// Float32 returns the float32 value for a key.
+func (c *Config) Float32(key string) float32 {
+	v, ok := asFloat64(c.values[key])
+	if !ok {
+		return 0
+	}
+	return float32(v)
+}
+
 // Float64 returns the float64 value for a key.
 func (c *Config) Float64(key string) float64 {
-	if val, ok := c.values[key]; ok {
-		if f, ok := val.(float64); ok {
-			return f
-		}
+	v, ok := asFloat64(c.values[key])
+	if !ok {
+		return 0
 	}
-	return 0.0
+	return v
 }
 
 // StringSlice returns the string slice value for a key.
@@ -159,16 +275,31 @@ func (c *Config) setFieldValue(fieldVal reflect.Value, fieldType reflect.Type, k
 			fieldVal.SetString(s)
 		}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if i, ok := val.(int); ok {
-			fieldVal.SetInt(int64(i))
+		if v, ok := asInt64(val); ok {
+			if fieldVal.OverflowInt(v) {
+				return fmt.Errorf("value %v is out of range for %s", val, fieldType)
+			}
+			fieldVal.SetInt(v)
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if v, ok := asUint64(val); ok {
+			if fieldVal.OverflowUint(v) {
+				return fmt.Errorf("value %v is out of range for %s", val, fieldType)
+			}
+			fieldVal.SetUint(v)
+		} else if _, isInt := asInt64(val); isInt {
+			return fmt.Errorf("value %v is out of range for %s", val, fieldType)
 		}
 	case reflect.Bool:
 		if b, ok := val.(bool); ok {
 			fieldVal.SetBool(b)
 		}
 	case reflect.Float32, reflect.Float64:
-		if f, ok := val.(float64); ok {
-			fieldVal.SetFloat(f)
+		if v, ok := asFloat64(val); ok {
+			if fieldVal.OverflowFloat(v) {
+				return fmt.Errorf("value %v is out of range for %s", val, fieldType)
+			}
+			fieldVal.SetFloat(v)
 		}
 	case reflect.Slice:
 		if fieldType.Elem().Kind() == reflect.String {

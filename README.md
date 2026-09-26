@@ -10,8 +10,9 @@ A lightweight, focused command-line flag parser for Go with environment variable
 - **Environment variables** — Custom env var names per flag, with prefix support
 - **Env var translation** — Nested keys use `__` instead of `.` in env vars
 - **Struct tags** — Unmarshal into structs with `flag:"key"` tags
-- **Type support** — String, Int, Bool, Float64, StringSlice
+- **Type support** — String, Bool, StringSlice, `Int`/`Int8`/`Int16`/`Int32`/`Int64`, `Uint`/`Uint8`/`Uint16`/`Uint32`/`Uint64`, `Float32`/`Float64`
 - **Precedence** — CLI args > environment variables > defaults
+- **Built-in help & version** — `Handle()` returns `ShouldExit`, `Output` and the version string
 
 ## Installation
 
@@ -40,20 +41,16 @@ func main() {
     fs.String("db.host", "", "localhost", "db host").Env("DB_HOST")
     fs.Int("verbose", "v", 0, "verbosity level")
     
-    // Parse command-line arguments
-    cfg, err := fs.Parse(os.Args[1:])
-    if err != nil {
-        if err.Error() == "__HELP__" {
-            fmt.Print(fs.Usage())
-            os.Exit(0)
+    // Parse command-line arguments; Handle resolves --help and --version
+    res := fs.Handle(os.Args[1:])
+    if res.ShouldExit {
+        fmt.Print(res.Output)     // usage text, "myapp 1.0.0" or the error
+        if res.Err != nil {
+            os.Exit(1)
         }
-        if err.Error() == "__VERSION__" {
-            fmt.Println("myapp version " + fs.version)
-            os.Exit(0)
-        }
-        fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-        os.Exit(1)
+        os.Exit(0)
     }
+    cfg := res.Config
     
     // Access values
     fmt.Printf("Server: %s:%d\n", cfg.String("server.host"), cfg.Int("server.port"))
@@ -98,6 +95,22 @@ Adds an int flag.
 fs.Int("port", "p", 8080, "listen port")
 ```
 
+#### `Int8/Int16/Int32/Int64(key, short string, defaultVal <type>, help string) *Flag`
+Adds a signed integer flag of the given width.
+
+```go
+fs.Int64("id", "i", int64(0), "unique id")
+fs.Int16("temp", "", int16(0), "temperature")
+```
+
+#### `Uint/Uint8/Uint16/Uint32/Uint64(key, short string, defaultVal <type>, help string) *Flag`
+Adds an unsigned integer flag. Negative values are rejected at parse time.
+
+```go
+fs.Uint16("mask", "", uint16(0), "netmask")
+fs.Uint64("size", "", uint64(0), "size in bytes")
+```
+
 #### `Bool(key, short string, defaultVal bool, help string) *Flag`
 Adds a bool flag.
 
@@ -110,6 +123,13 @@ Adds a float64 flag.
 
 ```go
 fs.Float64("threshold", "t", 0.5, "threshold")
+```
+
+#### `Float32(key, short string, defaultVal float32, help string) *Flag`
+Adds a float32 flag.
+
+```go
+fs.Float32("ratio", "", float32(0), "ratio")
 ```
 
 #### `StringSlice(key, short, help string) *Flag`
@@ -159,23 +179,45 @@ fmt.Print(fs.Usage())
 #### `Parse(args []string) (*Config, error)`
 Parses command-line arguments and returns a Config with resolved values.
 
-Returns special errors for built-in flags:
-- `error.Error() == "__HELP__"` when `--help` or `-h` is used
-- `error.Error() == "__VERSION__"` when `--version` or `-v` is used
+Returns special errors for built-in flags — match them with `errors.Is`:
+- `errors.Is(err, varg.ErrHelp)` when `--help` or `-h` is used
+- `errors.Is(err, varg.ErrVersion)` when `--version` or `-v` is used
 
 ```go
 cfg, err := fs.Parse(os.Args[1:])
 if err != nil {
-    if err.Error() == "__HELP__" {
+    if errors.Is(err, varg.ErrHelp) {
         fmt.Print(fs.Usage())
-        os.Exit(0)
-    }
-    if err.Error() == "__VERSION__" {
-        fmt.Printf("myapp %s\n", fs.version)
         os.Exit(0)
     }
     log.Fatal(err)
 }
+```
+
+#### `Handle(args []string) Result`
+Parses args like `Parse`, but resolves the built-in help and version flags itself and
+returns everything needed to print and exit.
+
+| Field | Description |
+| --- | --- |
+| `Config` | Parsed values, `nil` unless parsing succeeded |
+| `ShouldExit` | Print `Output` before the program stops |
+| `Output` | Usage text for `--help`, `myapp 1.2.3` for `--version`, the error message otherwise |
+| `Err` | `nil` on success, help and version; set when parsing failed (use it as exit code) |
+| `Version` | The version string configured with `Version()`, empty when unset |
+| `Help` | The usage text of this flag set |
+
+```go
+res := fs.Handle(os.Args[1:])
+if res.ShouldExit {
+    fmt.Print(res.Output)
+    if res.Err != nil {
+        os.Exit(1)
+    }
+    os.Exit(0)
+}
+cfg := res.Config
+fmt.Println("version:", res.Version)
 ```
 
 ### Flag
@@ -220,6 +262,16 @@ Gets an int value.
 port := cfg.Int("server.port")
 ```
 
+#### `Int8/Int16/Int32/Int64(key string) <type>` · `Uint/Uint8/Uint16/Uint32/Uint64(key string) <type>`
+Width specific integer getters. They convert between numeric types and return
+the zero value when the value does not fit (a negative value in a `Uint`
+getter, an out of range value in a sized getter).
+
+```go
+id := cfg.Int64("id")
+mask := cfg.Uint16("mask")
+```
+
 #### `Bool(key string) bool`
 Gets a bool value.
 
@@ -232,6 +284,13 @@ Gets a float64 value.
 
 ```go
 threshold := cfg.Float64("threshold")
+```
+
+#### `Float32(key string) float32`
+Gets a float32 value (integer values are converted).
+
+```go
+ratio := cfg.Float32("ratio")
 ```
 
 #### `StringSlice(key string) []string`
@@ -439,6 +498,16 @@ Examples:
 - `flag:"output"` with `EnvWithPrefix("APP")` → reads `APP_OUTPUT`
 - `flag:"server.host"` with `EnvWithPrefix("APP")` → reads `APP_SERVER__HOST`
 - `flag:"db.server.port"` with `EnvWithPrefix("CONFIG")` → reads `CONFIG_DB__SERVER__PORT`
+
+The help output shows the environment variable of every flag that has one:
+
+```text
+$ ./myapp --help
+Options:
+  -h, --help            show this help message
+  -o, --output          output file [$OUTPUT_FILE]
+      --server.host     server host [$APP_SERVER__HOST]
+```
 
 ## Testing
 

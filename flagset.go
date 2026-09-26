@@ -4,13 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
+	"strconv"
 	"strings"
 )
 
 // Sentinel errors returned when the built-in help/version flags are requested.
 var (
-	errHelp    = errors.New("__HELP__")
-	errVersion = errors.New("__VERSION__")
+	ErrHelp    = errors.New("__HELP__")
+	ErrVersion = errors.New("__VERSION__")
 )
 
 // lookup resolves a flag name (long or short form) to either a user flag or a
@@ -43,7 +45,7 @@ func New(name string) *FlagSet {
 		shorts:       make(map[string]lookup),
 		parsedValues: make(map[string]interface{}),
 	}
-	fs.registerBuiltin("help", "h", errHelp)
+	fs.registerBuiltin("help", "h", ErrHelp)
 	return fs
 }
 
@@ -57,6 +59,51 @@ func (fs *FlagSet) Int(key, short string, defaultVal int, help string) *Flag {
 	return fs.addFlag(key, short, defaultVal, help, TypeInt)
 }
 
+// Int8 adds an int8 flag to the set.
+func (fs *FlagSet) Int8(key, short string, defaultVal int8, help string) *Flag {
+	return fs.addFlag(key, short, defaultVal, help, TypeInt8)
+}
+
+// Int16 adds an int16 flag to the set.
+func (fs *FlagSet) Int16(key, short string, defaultVal int16, help string) *Flag {
+	return fs.addFlag(key, short, defaultVal, help, TypeInt16)
+}
+
+// Int32 adds an int32 flag to the set.
+func (fs *FlagSet) Int32(key, short string, defaultVal int32, help string) *Flag {
+	return fs.addFlag(key, short, defaultVal, help, TypeInt32)
+}
+
+// Int64 adds an int64 flag to the set.
+func (fs *FlagSet) Int64(key, short string, defaultVal int64, help string) *Flag {
+	return fs.addFlag(key, short, defaultVal, help, TypeInt64)
+}
+
+// Uint adds a uint flag to the set.
+func (fs *FlagSet) Uint(key, short string, defaultVal uint, help string) *Flag {
+	return fs.addFlag(key, short, defaultVal, help, TypeUint)
+}
+
+// Uint8 adds a uint8 flag to the set.
+func (fs *FlagSet) Uint8(key, short string, defaultVal uint8, help string) *Flag {
+	return fs.addFlag(key, short, defaultVal, help, TypeUint8)
+}
+
+// Uint16 adds a uint16 flag to the set.
+func (fs *FlagSet) Uint16(key, short string, defaultVal uint16, help string) *Flag {
+	return fs.addFlag(key, short, defaultVal, help, TypeUint16)
+}
+
+// Uint32 adds a uint32 flag to the set.
+func (fs *FlagSet) Uint32(key, short string, defaultVal uint32, help string) *Flag {
+	return fs.addFlag(key, short, defaultVal, help, TypeUint32)
+}
+
+// Uint64 adds a uint64 flag to the set.
+func (fs *FlagSet) Uint64(key, short string, defaultVal uint64, help string) *Flag {
+	return fs.addFlag(key, short, defaultVal, help, TypeUint64)
+}
+
 // Bool adds a bool flag to the set.
 func (fs *FlagSet) Bool(key, short string, defaultVal bool, help string) *Flag {
 	return fs.addFlag(key, short, defaultVal, help, TypeBool)
@@ -65,6 +112,11 @@ func (fs *FlagSet) Bool(key, short string, defaultVal bool, help string) *Flag {
 // Float64 adds a float64 flag to the set.
 func (fs *FlagSet) Float64(key, short string, defaultVal float64, help string) *Flag {
 	return fs.addFlag(key, short, defaultVal, help, TypeFloat64)
+}
+
+// Float32 adds a float32 flag to the set.
+func (fs *FlagSet) Float32(key, short string, defaultVal float32, help string) *Flag {
+	return fs.addFlag(key, short, defaultVal, help, TypeFloat32)
 }
 
 // StringSlice adds a string slice flag to the set (repeatable: -tag foo -tag bar).
@@ -122,21 +174,21 @@ func (fs *FlagSet) GlobalEnvPrefix(prefix string) *FlagSet {
 // overrides whichever of those names it uses.
 func (fs *FlagSet) Version(v string) *FlagSet {
 	fs.version = v
-	fs.registerBuiltin("version", "v", errVersion)
+	fs.registerBuiltin("version", "v", ErrVersion)
 	return fs
 }
 
 // DisableHelp disables the automatic --help(-h) flag.
 // Names already taken over by user flags are kept.
 func (fs *FlagSet) DisableHelp() *FlagSet {
-	fs.unregisterBuiltin("help", "h", errHelp)
+	fs.unregisterBuiltin("help", "h", ErrHelp)
 	return fs
 }
 
 // DisableVersion disables the automatic --version(-v) flag.
 // Names already taken over by user flags are kept.
 func (fs *FlagSet) DisableVersion() *FlagSet {
-	fs.unregisterBuiltin("version", "v", errVersion)
+	fs.unregisterBuiltin("version", "v", ErrVersion)
 	return fs
 }
 
@@ -158,11 +210,11 @@ func (fs *FlagSet) Usage() string {
 	buf.WriteString("Usage: " + fs.name + " [options]\n\n")
 	buf.WriteString("Options:\n")
 
-	if name, ok := fs.builtinNames("help", "h", errHelp); ok {
+	if name, ok := fs.builtinNames("help", "h", ErrHelp); ok {
 		fmt.Fprintf(&buf, "%-30s %s\n", name, "show this help message")
 	}
 	if fs.version != "" {
-		if name, ok := fs.builtinNames("version", "v", errVersion); ok {
+		if name, ok := fs.builtinNames("version", "v", ErrVersion); ok {
 			fmt.Fprintf(&buf, "%-30s %s\n", name, "show version")
 		}
 	}
@@ -174,7 +226,7 @@ func (fs *FlagSet) Usage() string {
 		} else {
 			optStr = fmt.Sprintf("  --%s", flag.Key)
 		}
-		fmt.Fprintf(&buf, "%-30s %s\n", optStr, flag.Help)
+		fmt.Fprintf(&buf, "%-30s %s\n", optStr, flag.helpText())
 	}
 
 	return buf.String()
@@ -195,6 +247,26 @@ func parseShortNumeral(short string) (int, bool) {
 	}
 
 	return len(short), true
+}
+
+// takesNextArg reports whether args[i+1] must be read as the value of flag.
+func takesNextArg(args []string, i int, flag *Flag) bool {
+	if i+1 >= len(args) {
+		return false
+	}
+	next := args[i+1]
+	if !strings.HasPrefix(next, "-") && !strings.HasPrefix(next, "+") {
+		return true
+	}
+	// Signed values (-1, +5) only qualify for numeric flags. Everything else
+	// stays an argument of its own, so -v -v and --out -h keep working.
+	return flag.Type.isNumeric() && isNumericLiteral(next)
+}
+
+// isNumericLiteral reports whether s looks like a number (-1, +5, 1.5e3).
+func isNumericLiteral(s string) bool {
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
 }
 
 // Parse parses command-line arguments and environment variables.
@@ -227,10 +299,10 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 
 			// If no value provided and not from =, try to get next arg
 			if !hasValue {
-				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") && !strings.HasPrefix(args[i+1], "+") {
+				if takesNextArg(args, i, flag) {
 					val = args[i+1]
 					i++
-				} else if flag.Type == TypeInt || flag.Type == TypeFloat64 {
+				} else if flag.Type.isNumeric() {
 					// Valueless numeric flag acts as a single increment.
 					if err := fs.adjustFlagValue(cliValues, flag, key, 1); err != nil {
 						return nil, err
@@ -256,8 +328,13 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 				return nil, fmt.Errorf("unknown flag: +%s", short)
 			}
 
+			flag := fs.flags[entry.flagKey]
+			if !flag.Type.isNumeric() || flag.Type.isUnsigned() {
+				return nil, fmt.Errorf("flag %s cannot be decremented", entry.flagKey)
+			}
+
 			// +k means decrement (negative value)
-			if err := fs.setFlagValue(cliValues, fs.flags[entry.flagKey], entry.flagKey, "-1"); err != nil {
+			if err := fs.setFlagValue(cliValues, flag, entry.flagKey, "-1"); err != nil {
 				return nil, err
 			}
 			continue
@@ -267,7 +344,7 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 		if strings.HasPrefix(arg, "-") && len(arg) > 1 {
 			short := arg[1:]
 
-			// Check for numeral shorthand: -ddd means -d 3.
+			// Check for numeral shorthand: -ddd means -d three times.
 			// Only numeric flags support this syntax.
 			if count, isNumeral := parseShortNumeral(short); isNumeral {
 				shortChar := string(short[0])
@@ -281,13 +358,15 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 				}
 
 				flag := fs.flags[entry.flagKey]
-				switch flag.Type {
-				case TypeInt, TypeFloat64:
-					if err := fs.setFlagValue(cliValues, flag, entry.flagKey, fmt.Sprintf("%d", count)); err != nil {
+				switch {
+				case flag.Type.isNumeric():
+					// Counting adds to the value, so -vvv, -v -v -v and
+					// mixed forms all agree.
+					if err := fs.adjustFlagValue(cliValues, flag, entry.flagKey, count); err != nil {
 						return nil, err
 					}
 					continue
-				case TypeBool:
+				case flag.Type == TypeBool:
 					if err := fs.setFlagValue(cliValues, flag, entry.flagKey, "true"); err != nil {
 						return nil, err
 					}
@@ -307,10 +386,10 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 			flag := fs.flags[entry.flagKey]
 
 			var val string
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") && !strings.HasPrefix(args[i+1], "+") {
+			if takesNextArg(args, i, flag) {
 				val = args[i+1]
 				i++
-			} else if flag.Type == TypeInt || flag.Type == TypeFloat64 {
+			} else if flag.Type.isNumeric() {
 				// Valueless numeric flag acts as a single increment, so
 				// -v -v -v matches -vvv.
 				if err := fs.adjustFlagValue(cliValues, flag, entry.flagKey, 1); err != nil {
@@ -367,25 +446,31 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 	}, nil
 }
 
-// adjustFlagValue increments or decrements a numeric flag relative to its
-// current CLI value (or its default when not yet set).
+// adjustFlagValue increments a numeric flag relative to its current CLI value
+// (or its default when it has not been set yet).
 func (fs *FlagSet) adjustFlagValue(target map[string]interface{}, flag *Flag, key string, delta int) error {
-	switch flag.Type {
-	case TypeInt:
-		cur, ok := target[key].(int)
-		if !ok {
-			cur, _ = flag.Default.(int)
-		}
-		target[key] = cur + delta
-	case TypeFloat64:
-		cur, ok := target[key].(float64)
-		if !ok {
-			cur, _ = flag.Default.(float64)
-		}
-		target[key] = cur + float64(delta)
+	cur, ok := target[key]
+	if !ok {
+		cur = flag.Default
+	}
+
+	var next string
+	switch rv := reflect.ValueOf(cur); rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		next = strconv.FormatInt(rv.Int()+int64(delta), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		next = strconv.FormatUint(rv.Uint()+uint64(delta), 10)
+	case reflect.Float32, reflect.Float64:
+		next = strconv.FormatFloat(rv.Float()+float64(delta), 'g', -1, 64)
 	default:
 		return fmt.Errorf("flag %s cannot be incremented", key)
 	}
+
+	converted, err := convertValue(next, flag.Type)
+	if err != nil {
+		return fmt.Errorf("error parsing flag %s: %w", key, err)
+	}
+	target[key] = converted
 	return nil
 }
 
@@ -403,4 +488,66 @@ func (fs *FlagSet) setFlagValue(target map[string]interface{}, flag *Flag, key, 
 
 	target[key] = converted
 	return nil
+}
+
+// Result is the outcome of Handle. It carries the parsed config together with
+// everything the built-in help and version flags produced.
+type Result struct {
+	// Config holds the parsed values. It is nil unless parsing succeeded.
+	Config *Config
+
+	// ShouldExit reports that Output has to be printed before the program
+	// stops: help or version was requested, or parsing failed.
+	ShouldExit bool
+
+	// Output is the text to print when ShouldExit is set: the usage text for
+	// --help, "<name> <version>" for --version, or the error message.
+	Output string
+
+	// Err is nil for a successful parse and for help/version requests, and is
+	// set when parsing failed. Use it to choose the exit code (0 or 1).
+	Err error
+
+	// Version is the version string configured with Version(), empty when unset.
+	Version string
+
+	// Help is the usage text of this flag set.
+	Help string
+}
+
+// Handle parses args like Parse, but resolves the built-in help and version
+// flags itself, so callers never have to compare internal error messages:
+//
+//	res := fs.Handle(os.Args[1:])
+//	if res.ShouldExit {
+//		fmt.Print(res.Output)
+//		if res.Err != nil {
+//			os.Exit(1)
+//		}
+//		os.Exit(0)
+//	}
+//	cfg := res.Config
+func (fs *FlagSet) Handle(args []string) Result {
+	res := Result{
+		Version: fs.version,
+		Help:    fs.Usage(),
+	}
+
+	cfg, err := fs.Parse(args)
+	switch {
+	case err == nil:
+		res.Config = cfg
+	case errors.Is(err, ErrHelp):
+		res.ShouldExit = true
+		res.Output = res.Help
+	case errors.Is(err, ErrVersion):
+		res.ShouldExit = true
+		res.Output = strings.TrimSpace(fs.name+" "+fs.version) + "\n"
+	default:
+		res.ShouldExit = true
+		res.Err = err
+		res.Output = err.Error() + "\n"
+	}
+
+	return res
 }
