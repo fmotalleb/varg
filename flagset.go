@@ -214,10 +214,13 @@ func (fs *FlagSet) builtinNames(long, short string, err error) (string, bool) {
 // Usage returns a formatted usage string.
 func (fs *FlagSet) Usage() string {
 	var buf strings.Builder
-	buf.WriteString(fs.about)
-	buf.WriteString("\nUsage: ")
+	if fs.about != "" {
+		buf.WriteString(fs.about)
+		buf.WriteString("\n")
+	}
+	buf.WriteString("Usage: ")
 	buf.WriteString(fs.name)
-	buf.WriteString(" [options]\n\n")
+	buf.WriteString(" [options] -- [literal parameters]\n\n")
 	buf.WriteString("Options:\n")
 
 	if name, ok := fs.builtinNames("help", "h", ErrHelp); ok {
