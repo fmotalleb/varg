@@ -110,7 +110,9 @@ func TestExampleStructUnmarshal(t *testing.T) {
 		Debug bool `flag:"debug"`
 	}
 
-	cfg.Unmarshal(&config)
+	if err := cfg.Unmarshal(&config); err != nil {
+		t.Error(err)
+	}
 
 	if config.Server.Host != "api.dev.local" {
 		t.Errorf("server.host mismatch")
