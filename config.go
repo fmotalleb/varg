@@ -3,7 +3,6 @@ package varg
 import (
 	"fmt"
 	"reflect"
-	"strings"
 )
 
 // Config holds parsed flag values.
@@ -185,17 +184,22 @@ func (c *Config) StringSlice(key string) []string {
 }
 
 // Unmarshal populates a struct from parsed flag values.
-// Uses struct tags in the format: `flag:"key"`
-// For nested keys (e.g., "server.host"), the struct should have nested fields
-// or the tag should specify the full path.
+// Supports both `flag` and `arg` tags.
+//
+// Tag formats:
+//
+//	`flag:"key"` - direct key mapping
+//	`arg:"name"` - for use with Struct() method
+//
+// For nested structs, the field names are concatenated with dots (e.g., "server.addr").
 //
 // Example:
 //
 //	type Config struct {
 //	    Server struct {
-//	        Host string `flag:"server.host"`
-//	        Port int    `flag:"server.port"`
-//	    }
+//	        Host string `arg:"addr"`
+//	        Port int    `arg:"port"`
+//	    } `arg:"server"`
 //	}
 func (c *Config) Unmarshal(v interface{}) error {
 	val := reflect.ValueOf(v)
@@ -222,7 +226,7 @@ func (c *Config) unmarshalValue(val reflect.Value, pathPrefix string) error {
 			continue
 		}
 
-		// Check for explicit flag tag
+		// Check for explicit flag tag (old-style)
 		flagTag := field.Tag.Get("flag")
 		if flagTag != "" {
 			// Direct mapping with tag
@@ -232,26 +236,53 @@ func (c *Config) unmarshalValue(val reflect.Value, pathPrefix string) error {
 			continue
 		}
 
-		// Try to build nested key from struct hierarchy
-		nestedKey := field.Name
-		if pathPrefix != "" {
-			nestedKey = pathPrefix + "." + nestedKey
-		}
+		// Check for arg tag (new-style, from Struct())
+		argTag := field.Tag.Get("arg")
 
-		// Try to find matching flag
-		// Convert field name to lowercase for matching
-		lookupKey := strings.ToLower(nestedKey)
-		if _, ok := c.values[lookupKey]; ok {
-			if err := c.setFieldValue(fieldVal, field.Type, lookupKey); err != nil {
-				return fmt.Errorf("error setting field %s: %w", field.Name, err)
+		// If field is a struct, recurse into it
+		if fieldVal.Kind() == reflect.Struct {
+			// Build the path for nested fields
+			var nestedPath string
+			if argTag != "" {
+				if pathPrefix != "" {
+					nestedPath = pathPrefix + "." + argTag
+				} else {
+					nestedPath = argTag
+				}
+			} else if pathPrefix != "" {
+				nestedPath = pathPrefix + "." + field.Name
+			} else {
+				nestedPath = field.Name
+			}
+
+			if err := c.unmarshalValue(fieldVal, nestedPath); err != nil {
+				return err
 			}
 			continue
 		}
 
-		// If field is a struct, recurse
-		if fieldVal.Kind() == reflect.Struct {
-			if err := c.unmarshalValue(fieldVal, nestedKey); err != nil {
-				return err
+		// For non-struct fields, determine the lookup key
+		var lookupKey string
+		if argTag != "" {
+			// Build the full key from arg tag and path prefix
+			if pathPrefix != "" {
+				lookupKey = pathPrefix + "." + argTag
+			} else {
+				lookupKey = argTag
+			}
+		} else {
+			// Fall back to field name if no arg tag
+			if pathPrefix != "" {
+				lookupKey = pathPrefix + "." + field.Name
+			} else {
+				lookupKey = field.Name
+			}
+		}
+
+		// Try to find matching value
+		if _, ok := c.values[lookupKey]; ok {
+			if err := c.setFieldValue(fieldVal, field.Type, lookupKey); err != nil {
+				return fmt.Errorf("error setting field %s: %w", field.Name, err)
 			}
 		}
 	}
