@@ -26,6 +26,7 @@ type lookup struct {
 // FlagSet represents a set of command-line flags.
 type FlagSet struct {
 	name         string
+	about        string
 	flags        map[string]*Flag
 	longs        map[string]lookup
 	shorts       map[string]lookup
@@ -178,6 +179,12 @@ func (fs *FlagSet) Version(v string) *FlagSet {
 	return fs
 }
 
+// About sets the about string for --help output.
+func (fs *FlagSet) About(v string) *FlagSet {
+	fs.about = v
+	return fs
+}
+
 // DisableHelp disables the automatic --help(-h) flag.
 // Names already taken over by user flags are kept.
 func (fs *FlagSet) DisableHelp() *FlagSet {
@@ -207,7 +214,10 @@ func (fs *FlagSet) builtinNames(long, short string, err error) (string, bool) {
 // Usage returns a formatted usage string.
 func (fs *FlagSet) Usage() string {
 	var buf strings.Builder
-	buf.WriteString("Usage: " + fs.name + " [options]\n\n")
+	buf.WriteString(fs.about)
+	buf.WriteString("\nUsage: ")
+	buf.WriteString(fs.name)
+	buf.WriteString(" [options]\n\n")
 	buf.WriteString("Options:\n")
 
 	if name, ok := fs.builtinNames("help", "h", ErrHelp); ok {
