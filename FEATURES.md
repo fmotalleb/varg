@@ -162,7 +162,7 @@ Usage: myapp [options]
 
 Options:
   -h, --help            show this help message
-  -v, --version         show version
+      --version         show version
   -v, --verbose         verbosity level
   -o, --output          output file
 
@@ -176,8 +176,9 @@ Output: result.txt
 
 ## Notes
 
-- Built-in `-h, --help` and `-v, --version` flags are enabled by default
-- If you override with your own `-v` or `-h` flag, the built-in will take precedence unless disabled
+- Built-in `-h, --help` is enabled by default; `-v, --version` is enabled by `.Version()`
+- Registrations are override based: the last registration of a name wins, so a flag declared after a built-in takes over `-v`/`--version`/`-h`/`--help` (the built-in keeps the remaining name)
+- Repeated short flags are equivalent: `-vvv` and `-v -v -v` both count to 3
 - Numeral shorthand only works for repeated identical characters: `-vvv` counts, but `-vd` doesn't
 - Increment/decrement requires the `+` prefix: `+flag` sets value to -1
 - Empty env vars now correctly skip to default (don't override defaults with empty strings)

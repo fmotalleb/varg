@@ -1,31 +1,50 @@
 package varg
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 )
 
+// Sentinel errors returned when the built-in help/version flags are requested.
+var (
+	errHelp    = errors.New("__HELP__")
+	errVersion = errors.New("__VERSION__")
+)
+
+// lookup resolves a flag name (long or short form) to either a user flag or a
+// built-in flag. Registrations are override based: the last registration for a
+// given name wins, so a flag registered after a built-in takes that name over.
+type lookup struct {
+	flagKey string // key inside FlagSet.flags; empty for built-in flags
+	builtin error  // sentinel error for built-in flags; nil for user flags
+}
+
 // FlagSet represents a set of command-line flags.
 type FlagSet struct {
 	name         string
 	flags        map[string]*Flag
+	longs        map[string]lookup
+	shorts       map[string]lookup
 	globalPrefix string
 	parsedValues map[string]interface{}
 	version      string
-	helpFlag     bool
-	versionFlag  bool
 }
 
 // New creates a new FlagSet with the given name.
+// The built-in help flag (--help, -h) is registered first, so any later
+// registration of the same name overrides it.
 func New(name string) *FlagSet {
-	return &FlagSet{
+	fs := &FlagSet{
 		name:         name,
 		flags:        make(map[string]*Flag),
+		longs:        make(map[string]lookup),
+		shorts:       make(map[string]lookup),
 		parsedValues: make(map[string]interface{}),
-		helpFlag:     true,
-		versionFlag:  false,
 	}
+	fs.registerBuiltin("help", "h", errHelp)
+	return fs
 }
 
 // String adds a string flag to the set.
@@ -64,7 +83,31 @@ func (fs *FlagSet) addFlag(key, short string, defaultVal interface{}, help strin
 		envMatch: make([]string, 0),
 	}
 	fs.flags[key] = flag
+	fs.longs[key] = lookup{flagKey: key}
+	if short != "" {
+		fs.shorts[short] = lookup{flagKey: key}
+	}
 	return flag
+}
+
+// registerBuiltin claims the long and short names for a built-in flag.
+// Any name claimed earlier (by a previous built-in) is replaced.
+func (fs *FlagSet) registerBuiltin(long, short string, err error) {
+	fs.longs[long] = lookup{builtin: err}
+	if short != "" {
+		fs.shorts[short] = lookup{builtin: err}
+	}
+}
+
+// unregisterBuiltin releases the long and short names of a built-in flag.
+// Names that have been taken over by other registrations are left untouched.
+func (fs *FlagSet) unregisterBuiltin(long, short string, err error) {
+	if e, ok := fs.longs[long]; ok && e.builtin == err {
+		delete(fs.longs, long)
+	}
+	if e, ok := fs.shorts[short]; ok && e.builtin == err {
+		delete(fs.shorts, short)
+	}
 }
 
 // GlobalEnvPrefix sets a prefix for all env vars (e.g., "MYAPP_").
@@ -75,22 +118,38 @@ func (fs *FlagSet) GlobalEnvPrefix(prefix string) *FlagSet {
 }
 
 // Version sets the version string for --version output.
+// It registers the --version and -v names; a flag registered afterwards
+// overrides whichever of those names it uses.
 func (fs *FlagSet) Version(v string) *FlagSet {
 	fs.version = v
-	fs.versionFlag = true
+	fs.registerBuiltin("version", "v", errVersion)
 	return fs
 }
 
 // DisableHelp disables the automatic --help(-h) flag.
+// Names already taken over by user flags are kept.
 func (fs *FlagSet) DisableHelp() *FlagSet {
-	fs.helpFlag = false
+	fs.unregisterBuiltin("help", "h", errHelp)
 	return fs
 }
 
 // DisableVersion disables the automatic --version(-v) flag.
+// Names already taken over by user flags are kept.
 func (fs *FlagSet) DisableVersion() *FlagSet {
-	fs.versionFlag = false
+	fs.unregisterBuiltin("version", "v", errVersion)
 	return fs
+}
+
+// builtinNames returns the usage display name of a built-in flag and whether
+// it is still registered. The short form is only shown while it owns it.
+func (fs *FlagSet) builtinNames(long, short string, err error) (string, bool) {
+	if e, ok := fs.longs[long]; !ok || e.builtin != err {
+		return "", false
+	}
+	if e, ok := fs.shorts[short]; ok && e.builtin == err {
+		return fmt.Sprintf("  -%s, --%s", short, long), true
+	}
+	return fmt.Sprintf("      --%s", long), true
 }
 
 // Usage returns a formatted usage string.
@@ -99,11 +158,13 @@ func (fs *FlagSet) Usage() string {
 	buf.WriteString("Usage: " + fs.name + " [options]\n\n")
 	buf.WriteString("Options:\n")
 
-	if fs.helpFlag {
-		buf.WriteString("  -h, --help            show this help message\n")
+	if name, ok := fs.builtinNames("help", "h", errHelp); ok {
+		fmt.Fprintf(&buf, "%-30s %s\n", name, "show this help message")
 	}
-	if fs.versionFlag && fs.version != "" {
-		buf.WriteString("  -v, --version         show version\n")
+	if fs.version != "" {
+		if name, ok := fs.builtinNames("version", "v", errVersion); ok {
+			fmt.Fprintf(&buf, "%-30s %s\n", name, "show version")
+		}
 	}
 
 	for _, flag := range fs.flags {
@@ -153,29 +214,28 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 
 		// Handle long form: --key=value or --key value
 		if strings.HasPrefix(arg, "--") {
-			key, val, ok := strings.Cut(arg[2:], "=")
-			if !ok {
-				val = ""
-			}
+			key, val, hasValue := strings.Cut(arg[2:], "=")
 
-			// Check for built-in flags first
-			if key == "help" && fs.helpFlag {
-				return nil, fmt.Errorf("__HELP__")
-			}
-			if key == "version" && fs.versionFlag {
-				return nil, fmt.Errorf("__VERSION__")
-			}
-
-			flag, exists := fs.flags[key]
+			entry, exists := fs.longs[key]
 			if !exists {
 				return nil, fmt.Errorf("unknown flag: --%s", key)
 			}
+			if entry.builtin != nil {
+				return nil, entry.builtin
+			}
+			flag := fs.flags[entry.flagKey]
 
 			// If no value provided and not from =, try to get next arg
-			if val == "" && !ok {
+			if !hasValue {
 				if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") && !strings.HasPrefix(args[i+1], "+") {
 					val = args[i+1]
 					i++
+				} else if flag.Type == TypeInt || flag.Type == TypeFloat64 {
+					// Valueless numeric flag acts as a single increment.
+					if err := fs.adjustFlagValue(cliValues, flag, key, 1); err != nil {
+						return nil, err
+					}
+					continue
 				} else {
 					val = "true"
 				}
@@ -191,24 +251,13 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 		if strings.HasPrefix(arg, "+") && len(arg) > 1 {
 			short := arg[1:]
 
-			// Find flag by short form
-			var flag *Flag
-			var flagKey string
-			for k, f := range fs.flags {
-				if f.Short == short {
-					flag = f
-					flagKey = k
-					break
-				}
-			}
-
-			if flag == nil {
+			entry, exists := fs.shorts[short]
+			if !exists || entry.builtin != nil {
 				return nil, fmt.Errorf("unknown flag: +%s", short)
 			}
 
 			// +k means decrement (negative value)
-			val := "-1"
-			if err := fs.setFlagValue(cliValues, flag, flagKey, val); err != nil {
+			if err := fs.setFlagValue(cliValues, fs.flags[entry.flagKey], entry.flagKey, "-1"); err != nil {
 				return nil, err
 			}
 			continue
@@ -223,23 +272,23 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 			if count, isNumeral := parseShortNumeral(short); isNumeral {
 				shortChar := string(short[0])
 
-				var flag *Flag
-				var flagKey string
-				for k, f := range fs.flags {
-					if f.Short == shortChar {
-						flag = f
-						flagKey = k
-						break
-					}
-				}
-
-				if flag == nil {
+				entry, exists := fs.shorts[shortChar]
+				if !exists {
 					return nil, fmt.Errorf("unknown flag: -%s", shortChar)
 				}
+				if entry.builtin != nil {
+					return nil, entry.builtin
+				}
 
-				if flag.Type == TypeInt || flag.Type == TypeFloat64 {
-					val := fmt.Sprintf("%d", count)
-					if err := fs.setFlagValue(cliValues, flag, flagKey, val); err != nil {
+				flag := fs.flags[entry.flagKey]
+				switch flag.Type {
+				case TypeInt, TypeFloat64:
+					if err := fs.setFlagValue(cliValues, flag, entry.flagKey, fmt.Sprintf("%d", count)); err != nil {
+						return nil, err
+					}
+					continue
+				case TypeBool:
+					if err := fs.setFlagValue(cliValues, flag, entry.flagKey, "true"); err != nil {
 						return nil, err
 					}
 					continue
@@ -248,38 +297,31 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 				// Not a numeric flag, so interpret it as a normal short flag.
 			}
 
-			// Check for built-in flags first (before looking up user flags)
-			if short == "h" && fs.helpFlag {
-				return nil, fmt.Errorf("__HELP__")
-			}
-			if short == "v" && fs.versionFlag {
-				return nil, fmt.Errorf("__VERSION__")
-			}
-
-			// Regular short form
-			var flag *Flag
-			var flagKey string
-			for k, f := range fs.flags {
-				if f.Short == short {
-					flag = f
-					flagKey = k
-					break
-				}
-			}
-
-			if flag == nil {
+			entry, exists := fs.shorts[short]
+			if !exists {
 				return nil, fmt.Errorf("unknown flag: -%s", short)
 			}
+			if entry.builtin != nil {
+				return nil, entry.builtin
+			}
+			flag := fs.flags[entry.flagKey]
 
 			var val string
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") && !strings.HasPrefix(args[i+1], "+") {
 				val = args[i+1]
 				i++
+			} else if flag.Type == TypeInt || flag.Type == TypeFloat64 {
+				// Valueless numeric flag acts as a single increment, so
+				// -v -v -v matches -vvv.
+				if err := fs.adjustFlagValue(cliValues, flag, entry.flagKey, 1); err != nil {
+					return nil, err
+				}
+				continue
 			} else {
 				val = "true"
 			}
 
-			if err := fs.setFlagValue(cliValues, flag, flagKey, val); err != nil {
+			if err := fs.setFlagValue(cliValues, flag, entry.flagKey, val); err != nil {
 				return nil, err
 			}
 			continue
@@ -324,6 +366,29 @@ func (fs *FlagSet) Parse(args []string) (*Config, error) {
 		flags:  fs.flags,
 	}, nil
 }
+
+// adjustFlagValue increments or decrements a numeric flag relative to its
+// current CLI value (or its default when not yet set).
+func (fs *FlagSet) adjustFlagValue(target map[string]interface{}, flag *Flag, key string, delta int) error {
+	switch flag.Type {
+	case TypeInt:
+		cur, ok := target[key].(int)
+		if !ok {
+			cur, _ = flag.Default.(int)
+		}
+		target[key] = cur + delta
+	case TypeFloat64:
+		cur, ok := target[key].(float64)
+		if !ok {
+			cur, _ = flag.Default.(float64)
+		}
+		target[key] = cur + float64(delta)
+	default:
+		return fmt.Errorf("flag %s cannot be incremented", key)
+	}
+	return nil
+}
+
 func (fs *FlagSet) setFlagValue(target map[string]interface{}, flag *Flag, key, val string) error {
 	converted, err := convertValue(val, flag.Type)
 	if err != nil {
@@ -331,17 +396,7 @@ func (fs *FlagSet) setFlagValue(target map[string]interface{}, flag *Flag, key, 
 	}
 
 	if flag.Type == TypeStringSlice {
-		existing, ok := target[key]
-		if !ok {
-			target[key] = existing.([]string)
-			return nil
-		}
-
-		slice, ok := existing.([]string)
-		if !ok {
-			return fmt.Errorf("invalid existing value for string slice flag %s", key)
-		}
-
+		slice, _ := target[key].([]string)
 		target[key] = append(slice, converted.([]string)...)
 		return nil
 	}

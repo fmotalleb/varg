@@ -18,13 +18,13 @@ const (
 
 // Flag represents a single command-line flag.
 type Flag struct {
-	Key       string
-	Short     string
-	Default   interface{}
-	Help      string
-	Type      Type
-	EnvVar    string
-	envMatch  []string
+	Key      string
+	Short    string
+	Default  interface{}
+	Help     string
+	Type     Type
+	EnvVar   string
+	envMatch []string
 }
 
 // Env sets the environment variable name for this flag.
